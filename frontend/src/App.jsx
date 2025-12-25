@@ -1,21 +1,28 @@
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import AppShell from "./components/layout/AppShell";
+
+import Home from "./pages/Home";
+import Feed from "./pages/Feed";
+import MediaDetail from "./pages/MediaDetail";
+import Upload from "./pages/creator/Upload";
+import MyUploads from "./pages/creator/MyUploads";
+import Unauthorized from "./pages/Unauthorized";
+import NotFound from "./pages/NotFound";
+
 export default function App() {
   return (
-    <div style={{ fontFamily: "system-ui", padding: "24px" }}>
-      <h1>COM769 Media Management App</h1>
-      <p style={{ opacity: 0.7 }}>
-        Phase 4 – Frontend (React + Vite)
-      </p>
-
-      <h3>Planned Pages</h3>
-      <ul>
-        <li>/ (Home)</li>
-        <li>/feed</li>
-        <li>/media/:id</li>
-        <li>/creator/upload</li>
-        <li>/creator/my-uploads</li>
-        <li>/unauthorized</li>
-        <li>* (404)</li>
-      </ul>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route path="/" element={<Home />} />
+          <Route path="/feed" element={<Feed />} />
+          <Route path="/media/:id" element={<MediaDetail />} />
+          <Route path="/creator/upload" element={<Upload />} />
+          <Route path="/creator/my-uploads" element={<MyUploads />} />
+          <Route path="/unauthorized" element={<Unauthorized />} />
+          <Route path="*" element={<NotFound />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   );
 }
