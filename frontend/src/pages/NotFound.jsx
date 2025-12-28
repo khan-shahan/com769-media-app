@@ -1,11 +1,17 @@
-﻿import { Link } from "react-router-dom";
+import { Link } from "react-router-dom";
+import Card from "../components/common/Card";
+import PageHeader from "../components/common/PageHeader";
 
 export default function NotFound() {
   return (
-    <div>
-      <h1>404</h1>
-      <p style={{ opacity: 0.75 }}>Page not found.</p>
-      <Link to="/feed">Back to Feed</Link>
+    <div style={{ display: "grid", gap: 16 }}>
+      <PageHeader
+        title="404"
+        subtitle="The page you requested does not exist."
+      />
+      <Card>
+        <Link to="/feed">← Back to Feed</Link>
+      </Card>
     </div>
   );
 }

@@ -10,7 +10,7 @@ export default function AppShell() {
   });
 
   return (
-    <div style={{ fontFamily: "system-ui", border: "6px solid red" }}>
+   <div style={{ fontFamily: "system-ui", background: "rgba(0,0,0,0.03)", minHeight: "100vh" }}>
       <header style={{ borderBottom: "1px solid rgba(0,0,0,0.08)", background: "#fff" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "14px 16px", display: "flex", justifyContent: "space-between" }}>
           <div style={{ fontWeight: 700 }}>COM769 Media App</div>
@@ -23,7 +23,7 @@ export default function AppShell() {
         </div>
       </header>
 
-      <main style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
+      <main style={{ maxWidth: 1100, margin: "0 auto", padding: "26px 16px" }}>
         <Outlet />
       </main>
     </div>
