@@ -19,6 +19,13 @@ export default function AppShell() {
             <NavLink to="/feed" style={linkStyle}>Feed</NavLink>
             <NavLink to="/creator/upload" style={linkStyle}>Creator Upload</NavLink>
             <NavLink to="/creator/my-uploads" style={linkStyle}>My Uploads</NavLink>
+            <a href="/.auth/login/aad" style={{ textDecoration: "none", padding: "8px 10px", borderRadius: 8 }}>
+  Login
+</a>
+<a href="/.auth/logout" style={{ textDecoration: "none", padding: "8px 10px", borderRadius: 8 }}>
+  Logout
+</a>
+
           </nav>
         </div>
       </header>
