@@ -1,20 +1,27 @@
 const { app } = require("@azure/functions");
 const { CosmosClient } = require("@azure/cosmos");
-const { BlobServiceClient } = require("@azure/storage-blob");
+const {
+  generateBlobSASQueryParameters,
+  BlobSASPermissions,
+  StorageSharedKeyCredential,
+} = require("@azure/storage-blob");
 
+// --------------------
+// helpers
+// --------------------
 function mustGet(name) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env var: ${name}`);
   return v;
 }
 
-function getContainer() {
+function getMediaContainer() {
   const client = new CosmosClient(mustGet("COSMOS_CONNECTION_STRING"));
   const db = client.database(mustGet("COSMOS_DATABASE_NAME"));
   return db.container(mustGet("COSMOS_CONTAINER_MEDIA"));
 }
 
-// helper: fetch item by id (query, works without knowing partition key)
+// Query-based fetch (works without knowing partition key)
 async function findById(container, id) {
   const querySpec = {
     query: "SELECT * FROM c WHERE c.id = @id",
@@ -24,114 +31,138 @@ async function findById(container, id) {
   return resources?.[0] || null;
 }
 
-// Parse Azure Blob URL -> { containerName, blobPath } or null
-function parseAzureBlobUrl(blobUrl) {
+// Robustly extract {id} even if bindingData is missing
+function getRouteId(req, context) {
+  // 1) preferred (when available)
+  const fromBinding = context?.bindingData?.id;
+  if (fromBinding) return fromBinding;
+
+  // 2) some runtimes expose params
+  const fromParams = req?.params?.id;
+  if (fromParams) return fromParams;
+
+  // 3) fallback: parse from URL path
   try {
-    const u = new URL(blobUrl);
-
-    // Only handle Azure Blob hostnames (basic check)
-    if (!u.hostname.includes(".blob.core.windows.net")) return null;
-
-    // pathname like: /<container>/<blobPath>
+    const u = new URL(req.url);
     const parts = u.pathname.split("/").filter(Boolean);
-    if (parts.length < 2) return null;
-
-    const containerName = parts[0];
-    const blobPath = parts.slice(1).join("/");
-
-    return { containerName, blobPath };
+    return parts[parts.length - 1]; // last segment
   } catch {
     return null;
   }
 }
 
-async function deleteBlobIfAzureUrl(context, blobUrl) {
-  if (!blobUrl) return;
-
-  const parsed = parseAzureBlobUrl(blobUrl);
-  if (!parsed) {
-    // Not an Azure Blob URL (or not parseable) -> skip cleanup
-    context.log(`Blob cleanup skipped (non-Azure or invalid blobUrl): ${blobUrl}`);
-    return;
+// Parse AccountName + AccountKey out of STORAGE_CONNECTION_STRING
+function parseStorageConnStr(connStr) {
+  const parts = connStr.split(";").filter(Boolean);
+  const map = {};
+  for (const p of parts) {
+    const idx = p.indexOf("=");
+    if (idx > 0) map[p.slice(0, idx)] = p.slice(idx + 1);
   }
-
-  const { containerName, blobPath } = parsed;
-
-  const storageConn = mustGet("STORAGE_CONNECTION_STRING");
-  const blobServiceClient = BlobServiceClient.fromConnectionString(storageConn);
-
-  const containerClient = blobServiceClient.getContainerClient(containerName);
-  const blobClient = containerClient.getBlobClient(blobPath);
-
-  // Best practice: delete blob + any snapshots (if any exist)
-  const result = await blobClient.deleteIfExists({ deleteSnapshots: "include" });
-
-  context.log(
-    `Blob deleteIfExists: deleted=${result.succeeded} container=${containerName} blob=${blobPath}`
-  );
+  const account = map["AccountName"];
+  const key = map["AccountKey"];
+  if (!account || !key) throw new Error("STORAGE_CONNECTION_STRING missing AccountName/AccountKey");
+  return { account, key };
 }
 
+function parseBlobUrl(blobUrl) {
+  const u = new URL(blobUrl);
+  const parts = u.pathname.split("/").filter(Boolean);
+  const containerName = parts.shift();
+  const blobName = parts.join("/");
+  return { containerName, blobName };
+}
+
+function toReadSasUrl(blobUrl, minutes = 60) {
+  const connStr = mustGet("STORAGE_CONNECTION_STRING");
+  const { account, key } = parseStorageConnStr(connStr);
+  const { containerName, blobName } = parseBlobUrl(blobUrl);
+
+  const credential = new StorageSharedKeyCredential(account, key);
+  const expiresOn = new Date(Date.now() + minutes * 60 * 1000);
+
+  const sas = generateBlobSASQueryParameters(
+    {
+      containerName,
+      blobName,
+      permissions: BlobSASPermissions.parse("r"),
+      expiresOn,
+    },
+    credential
+  ).toString();
+
+  return `https://${account}.blob.core.windows.net/${containerName}/${blobName}?${sas}`;
+}
+
+function addAccessUrl(item) {
+  if (!item?.blobUrl) return { ...item, accessUrl: null };
+  try {
+    return { ...item, accessUrl: toReadSasUrl(item.blobUrl, 60) };
+  } catch {
+    return { ...item, accessUrl: null };
+  }
+}
+
+// --------------------
+// function
+// --------------------
 app.http("mediaById", {
-  route: "media/{id}",
-  methods: ["PATCH", "DELETE"],
+  methods: ["GET", "PATCH", "DELETE"],
   authLevel: "anonymous",
-  handler: async (request, context) => {
-    try {
-      const container = getContainer();
-      const id = request.params.id;
+  route: "media/{id}",
+  handler: async (req, context) => {
+    const container = getMediaContainer();
 
-      // 1) Load existing item (so we know partition key value = mediaType)
-      const existing = await findById(container, id);
-      if (!existing) {
-        return { status: 404, jsonBody: { error: "NotFound", message: "Media item not found" } };
-      }
+    const id = getRouteId(req, context);
+    if (!id) return { status: 400, jsonBody: { error: "Missing route id" } };
 
-      const pk = existing.mediaType; // because partition key path is /mediaType
-
-      // -----------------------
-      // PATCH: partial update
-      // -----------------------
-      if (request.method === "PATCH") {
-        const body = await request.json();
-
-        const next = { ...existing };
-
-        if (typeof body.title === "string") next.title = body.title.trim();
-        if (typeof body.blobUrl === "string") next.blobUrl = body.blobUrl.trim();
-
-        if (body.mediaType && body.mediaType !== existing.mediaType) {
-          return {
-            status: 400,
-            jsonBody: {
-              error: "BadRequest",
-              message: "mediaType cannot be changed (partition key). Create a new item instead.",
-            },
-          };
-        }
-
-        next.updatedAt = new Date().toISOString();
-
-        const { resource } = await container.item(id, pk).replace(next);
-        return { status: 200, jsonBody: resource };
-      }
-
-      // -----------------------
-      // DELETE: remove blob + record
-      // -----------------------
-      if (request.method === "DELETE") {
-        // 1) Try blob cleanup (only if blobUrl is Azure Blob URL)
-        await deleteBlobIfAzureUrl(context, existing.blobUrl);
-
-        // 2) Delete Cosmos record
-        await container.item(id, pk).delete();
-
-        return { status: 204 };
-      }
-
-      return { status: 405, jsonBody: { error: "MethodNotAllowed" } };
-    } catch (err) {
-      context.error(err);
-      return { status: 500, jsonBody: { error: "Server error", message: err.message } };
+    // --------------------
+    // GET /api/media/{id}
+    // --------------------
+    if (req.method === "GET") {
+      const item = await findById(container, id);
+      if (!item) return { status: 404, jsonBody: { error: "Not found" } };
+      return { status: 200, jsonBody: addAccessUrl(item) };
     }
+
+    // --------------------
+    // PATCH /api/media/{id}
+    // --------------------
+    if (req.method === "PATCH") {
+      const item = await findById(container, id);
+      if (!item) return { status: 404, jsonBody: { error: "Not found" } };
+
+      const body = await req.json().catch(() => ({}));
+      const now = new Date().toISOString();
+
+      const updated = {
+        ...item,
+        title: body.title ?? item.title,
+        caption: body.caption ?? item.caption,
+        location: body.location ?? item.location,
+        people: Array.isArray(body.people) ? body.people : item.people,
+        updatedAt: now,
+      };
+
+      // NOTE: assumes partition key is /id (common in this coursework setup)
+      await container.item(item.id, item.id).replace(updated);
+
+      return { status: 200, jsonBody: addAccessUrl(updated) };
+    }
+
+    // --------------------
+    // DELETE /api/media/{id}
+    // --------------------
+    if (req.method === "DELETE") {
+      const item = await findById(container, id);
+      if (!item) return { status: 404, jsonBody: { error: "Not found" } };
+
+      // NOTE: assumes partition key is /id
+      await container.item(item.id, item.id).delete();
+
+      return { status: 204 };
+    }
+
+    return { status: 405, jsonBody: { error: "Method not allowed" } };
   },
 });

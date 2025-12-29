@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-
 import ErrorBanner from "../components/common/ErrorBanner";
 import { http } from "../services/http";
+import { Link } from "react-router-dom";
 import Card from "../components/common/Card";
 import PageHeader from "../components/common/PageHeader";
 import Button from "../components/common/Button";
@@ -14,9 +13,12 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        // If your backend has /health endpoint:
-        const data = await http("/health");
-        setApiStatus(data?.status || "API reachable");
+        const data = await http("/health"); // becomes /api/health via http.js
+        if (typeof data === "string") {
+          setApiStatus(data);
+        } else {
+          setApiStatus(data?.status || "API reachable");
+        }
       } catch (e) {
         setApiError(e);
         setApiStatus("API not reachable (local is ok for now)");
@@ -44,27 +46,19 @@ export default function Home() {
       <ErrorBanner error={apiError} />
       <div style={{ opacity: 0.7, fontSize: 13 }}>API: {apiStatus}</div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-          gap: 14,
-        }}
-      >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
         <Card>
           <h3 style={{ marginTop: 0 }}>Secure Uploads (SAS)</h3>
           <p style={{ marginBottom: 0, opacity: 0.75 }}>
             Creators upload directly to Azure Blob Storage using short-lived SAS URLs. Metadata is saved in Cosmos DB.
           </p>
         </Card>
-
         <Card>
           <h3 style={{ marginTop: 0 }}>Discovery & Search</h3>
           <p style={{ marginBottom: 0, opacity: 0.75 }}>
             Consumers browse the feed and search media by title, caption, location, and tags (people).
           </p>
         </Card>
-
         <Card>
           <h3 style={{ marginTop: 0 }}>Engagement</h3>
           <p style={{ marginBottom: 0, opacity: 0.75 }}>

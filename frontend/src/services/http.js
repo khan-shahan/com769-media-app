@@ -1,36 +1,26 @@
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
-async function parseJsonSafe(res) {
-  const text = await res.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
-  }
-}
+export async function http(path, options = {}) {
+  const clean = path.startsWith("/") ? path : `/${path}`;
+  const url = path.startsWith("http") ? path : `${API_BASE}${clean}`;
 
-export async function http(path, { method = "GET", body, headers } = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
+  const res = await fetch(url, {
     headers: {
-      "Content-Type": "application/json",
-      ...(headers || {}),
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    ...options,
   });
 
-  const data = await parseJsonSafe(res);
+  const text = await res.text();
 
   if (!res.ok) {
-    const msg =
-      (data && (data.message || data.error)) ||
-      `Request failed: ${res.status} ${res.statusText}`;
-    const err = new Error(msg);
-    err.status = res.status;
-    err.data = data;
-    throw err;
+    throw new Error(text || `Request failed: ${res.status} ${res.statusText}`);
   }
 
-  return data;
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return text;
+  }
 }

@@ -1,51 +1,106 @@
+// frontend/src/services/mediaApi.js
 import { http } from "./http";
 
-// Media
-export function getMedia({ q } = {}) {
-  const qs = q ? `?q=${encodeURIComponent(q)}` : "";
-  return http(`/media${qs}`);
+function normalizeList(data) {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.value)) return data.value;
+  return [];
 }
 
-export function createMedia(payload) {
-  // POST /api/media
-  return http(`/media`, { method: "POST", body: payload });
+/* -------------------- MEDIA LIST + DETAIL -------------------- */
+
+export async function getMedia({ q } = {}) {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+
+  const path = params.toString() ? `/media?${params.toString()}` : `/media`;
+  const data = await http(path);
+  return normalizeList(data);
 }
 
-// SAS upload
-export function requestUploadSas({ fileName, contentType, mediaType }) {
-  // POST /api/uploads/sas
+export async function getMediaById(id) {
+  if (!id) throw new Error("Missing media id");
+  return http(`/media/${encodeURIComponent(id)}`);
+}
+
+/* -------------------- CREATOR UPLOAD HELPERS (Phase 4.7) -------------------- */
+
+// Upload.jsx may expect `requestUploadSas`
+export async function requestUploadSas({ fileName, contentType, mediaType }) {
+  return getUploadSas({ fileName, contentType, mediaType });
+}
+
+// Canonical function
+export async function getUploadSas({ fileName, contentType, mediaType }) {
+  if (!fileName) throw new Error("fileName is required");
+  if (!contentType) throw new Error("contentType is required");
+  if (!mediaType) throw new Error("mediaType is required");
+
   return http(`/uploads/sas`, {
     method: "POST",
-    body: { fileName, contentType, mediaType },
+    body: JSON.stringify({ fileName, contentType, mediaType }),
   });
 }
 
-// Comments
-export function addComment(mediaId, { name, text }) {
-  return http(`/media/${encodeURIComponent(mediaId)}/comments`, {
+// Save metadata in Cosmos
+export async function createMedia({ title, mediaType, blobUrl, caption, location, people }) {
+  if (!title?.trim()) throw new Error("title is required");
+  if (!mediaType?.trim()) throw new Error("mediaType is required");
+  if (!blobUrl?.trim()) throw new Error("blobUrl is required");
+
+  return http(`/media`, {
     method: "POST",
-    body: { name, text },
+    body: JSON.stringify({
+      title: title.trim(),
+      mediaType: mediaType.trim(),
+      blobUrl: blobUrl.trim(),
+      caption: caption || "",
+      location: location || "",
+      people: Array.isArray(people) ? people : [],
+    }),
   });
 }
 
-export function listComments(mediaId) {
-  return http(`/media/${encodeURIComponent(mediaId)}/comments`);
+/* -------------------- COMMENTS -------------------- */
+
+export async function getComments(id) {
+  const data = await http(`/media/${encodeURIComponent(id)}/comments`);
+  return normalizeList(data);
 }
 
-// Ratings
-export function addRating(mediaId, { name, rating }) {
-  return http(`/media/${encodeURIComponent(mediaId)}/ratings`, {
+export async function postComment(id, { author, text }) {
+  if (!author?.trim()) throw new Error("Author is required");
+  if (!text?.trim()) throw new Error("Comment text is required");
+
+  return http(`/media/${encodeURIComponent(id)}/comments`, {
     method: "POST",
-    body: { name, rating },
+    body: JSON.stringify({
+      author: author.trim(),
+      text: text.trim(),
+    }),
   });
 }
 
-export function getRatingSummary(mediaId) {
-  return http(`/media/${encodeURIComponent(mediaId)}/ratings`);
+/* -------------------- RATINGS -------------------- */
+
+export async function getRatings(id) {
+  const data = await http(`/media/${encodeURIComponent(id)}/ratings`);
+  return data || { mediaId: id, count: 0, average: 0, ratings: [] };
 }
 
-export async function getMediaByIdFallback(id) {
-  const items = await getMedia();
-  const found = (Array.isArray(items) ? items : []).find((x) => x.id === id);
-  return found || null;
+export async function postRating(id, { author, stars }) {
+  if (!author?.trim()) throw new Error("Author is required");
+
+  const score = Number(stars);
+  if (!Number.isFinite(score) || score < 1 || score > 5) {
+    throw new Error("Stars must be 1..5");
+  }
+
+  return http(`/media/${encodeURIComponent(id)}/ratings`, {
+    method: "POST",
+    body: JSON.stringify({
+      author: author.trim(),
+      score, // ✅ backend expects "score"
+    }),
+  });
 }
