@@ -1,14 +1,17 @@
 {
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/api/*", "/*.png", "/*.jpg", "/*.jpeg", "/*.gif", "/*.svg", "/*.css", "/*.js", "/*.map"]
+    "exclude": ["/api/*"]
   },
   "routes": [
     {
-      "route": "/creator/*",
-      "allowedRoles": ["creator"],
-      "statusCode": 401,
-      "rewrite": "/unauthorized"
+      "route": "/unauthorized",
+      "statusCode": 200
+    },
+    {
+      "route": "/*",
+      "serve": "/index.html",
+      "statusCode": 200
     }
   ]
 }
